@@ -3,6 +3,7 @@ import { Play, RotateCcw } from "lucide-react";
 import { useRequest } from "../../contexts/RequestContext";
 import type { HttpMethod } from "../../contexts/RequestContext";
 import { useHistory } from "../../hooks/useHistory";
+import { ApiService } from "@/services/api.service";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,9 +33,12 @@ export const UrlBar = () => {
     dispatch({ type: "SET_FIELD", field: "url", value: e.target.value });
   };
 
+  const [useProxy, setUseProxy] = React.useState(true);
+
   const handleSend = async () => {
     dispatch({ type: "START_REQUEST" });
 
+    // 1. Prepare URL with Params
     let finalUrl = state.url;
     try {
       const activeParams = state.queryParams.filter((p) => p.enabled && p.key);
@@ -47,48 +51,44 @@ export const UrlBar = () => {
       console.warn("Invalid URL for params", e);
     }
 
+    // 2. Prepare Headers
     const headers: Record<string, string> = {};
     state.headers.forEach((h) => {
       if (h.enabled && h.key) headers[h.key] = h.value;
     });
 
-    const startTime = performance.now();
-    try {
-      const options: RequestInit = {
+    // 3. Prepare Body
+    let body: any = undefined;
+    if (["POST", "PUT", "PATCH"].includes(state.method) && state.bodyContent) {
+      try {
+        body = JSON.parse(state.bodyContent);
+      } catch (e) {
+        // If content type is not JSON, we might want to send as string
+        // For now, let's keep it simple or log error
+        console.warn("Body is not valid JSON", e);
+      }
+    }
+
+    // 4. Send Request via Service
+    const result = await ApiService.sendRequest(
+      {
+        url: finalUrl,
         method: state.method,
         headers,
-      };
+        body,
+      },
+      useProxy,
+    );
 
-      if (
-        ["POST", "PUT", "PATCH"].includes(state.method) &&
-        state.bodyContent
-      ) {
-        options.body = state.bodyContent;
-      }
+    dispatch({
+      type: "SET_RESPONSE",
+      response: result.data,
+      status: result.status,
+      time: result.time,
+      size: result.size,
+    });
 
-      const res = await fetch(finalUrl, options);
-      const data = await res.json();
-      const endTime = performance.now();
-
-      dispatch({
-        type: "SET_RESPONSE",
-        response: data,
-        status: res.status,
-        time: Math.round(endTime - startTime),
-        size: JSON.stringify(data).length,
-      });
-
-      addToHistory(state, res.status);
-    } catch (e) {
-      console.error(e);
-      dispatch({
-        type: "SET_RESPONSE",
-        response: { error: "Network Error", details: String(e) },
-        status: 0,
-        time: 0,
-        size: 0,
-      });
-    }
+    addToHistory(state, result.status);
   };
 
   const getMethodColor = (method: string) => {
@@ -107,7 +107,7 @@ export const UrlBar = () => {
   };
 
   return (
-    <div className="flex gap-2 p-4 border-b bg-background">
+    <div className="flex gap-2 p-4 border-b bg-background items-center">
       <Select value={state.method} onValueChange={handleMethodChange}>
         <SelectTrigger
           className={cn("w-[100px] font-bold", getMethodColor(state.method))}
@@ -134,6 +134,22 @@ export const UrlBar = () => {
         onChange={handleUrlChange}
         placeholder="Enter request URL"
       />
+
+      <div className="flex items-center gap-2 px-2">
+        <input
+          type="checkbox"
+          id="proxy-toggle"
+          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+          checked={useProxy}
+          onChange={(e) => setUseProxy(e.target.checked)}
+        />
+        <label
+          htmlFor="proxy-toggle"
+          className="text-sm text-muted-foreground whitespace-nowrap cursor-pointer select-none"
+        >
+          Use Proxy
+        </label>
+      </div>
 
       <Button
         onClick={handleSend}
