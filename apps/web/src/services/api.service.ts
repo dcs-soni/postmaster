@@ -76,11 +76,17 @@ export class ApiService {
         };
 
         if (shouldIncludeBody && payload.body !== undefined) {
-          // Stringify body if it's an object
-          options.body =
-            typeof payload.body === "string"
-              ? payload.body
-              : JSON.stringify(payload.body);
+          // Stringify body if it's an object and set Content-Type
+          if (typeof payload.body === "string") {
+            options.body = payload.body;
+          } else {
+            options.body = JSON.stringify(payload.body);
+            // Ensure Content-Type is set for JSON bodies
+            options.headers = {
+              ...options.headers,
+              "Content-Type": "application/json",
+            };
+          }
         }
 
         const res = await fetch(payload.url, options);
