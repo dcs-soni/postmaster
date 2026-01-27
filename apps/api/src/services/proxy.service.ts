@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 
 const REQUEST_TIMEOUT_MS = 30000;
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
-const MAX_REDIRECTS = 5;
+const MAX_REDIRECTS = 0; // Disable redirects to prevent SSRF bypass via redirect chains
 
 export interface ProxyRequest {
   url: string;
@@ -31,6 +31,21 @@ export class ProxyService {
         return false;
       }
 
+      // Block IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
+      if (hostname.startsWith("::ffff:")) {
+        const ipv4Part = hostname.slice(7);
+        // Re-validate the extracted IPv4 address
+        if (
+          localhostPatterns.includes(ipv4Part) ||
+          /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
+          /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
+          /^192\.168\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
+          /^169\.254\.\d{1,3}\.\d{1,3}$/.test(ipv4Part)
+        ) {
+          return false;
+        }
+      }
+
       // Block private IP ranges and cloud metadata endpoints
       const blockedPatterns = [
         /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // 10.0.0.0/8
@@ -41,6 +56,7 @@ export class ProxyService {
         /^\[?fe80:/i, // IPv6 link-local
         /^\[?fc00:/i, // IPv6 private
         /^\[?fd00:/i, // IPv6 private
+        /^\[?::ffff:/i, // IPv4-mapped IPv6 (bracket notation)
       ];
 
       if (blockedPatterns.some((pattern) => pattern.test(hostname))) {
