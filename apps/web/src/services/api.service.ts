@@ -16,7 +16,32 @@ export interface ApiResponse<T = unknown> {
 }
 
 export class ApiService {
-  private static readonly PROXY_URL = "http://localhost:3000/api/proxy";
+  // Configurable proxy URL via environment variable for deployment flexibility
+  private static readonly PROXY_URL =
+    import.meta.env.VITE_PROXY_URL || "http://localhost:3000/api/proxy";
+
+  /**
+   * Safely parse response based on content type
+   */
+  private static async parseResponse(res: Response): Promise<unknown> {
+    const contentType = res.headers.get("content-type") || "";
+
+    // Handle empty responses (e.g., 204 No Content)
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return null;
+    }
+
+    try {
+      if (contentType.includes("application/json")) {
+        return await res.json();
+      } else {
+        return await res.text();
+      }
+    } catch {
+      // If parsing fails, return null
+      return null;
+    }
+  }
 
   static async sendRequest(
     payload: ProxyRequestPayload,
@@ -39,30 +64,40 @@ export class ApiService {
           }),
         });
 
-        responseData = await res.json();
+        responseData = await this.parseResponse(res);
         status = res.status;
-        // Identify if the proxy returned an error wrapper or the actual response
-        // in our implementation, the proxy returns the target data directly and status matches target.
-        // However, if the proxy fails (500), it returns { error: ... }
       } else {
+        // Skip body for GET/HEAD requests
+        const shouldIncludeBody = !["GET", "HEAD"].includes(payload.method);
+
         const options: RequestInit = {
           method: payload.method,
           headers: payload.headers,
-          body: payload.body as BodyInit | null,
         };
 
+        if (shouldIncludeBody && payload.body !== undefined) {
+          // Stringify body if it's an object
+          options.body =
+            typeof payload.body === "string"
+              ? payload.body
+              : JSON.stringify(payload.body);
+        }
+
         const res = await fetch(payload.url, options);
-        responseData = await res.json();
+        responseData = await this.parseResponse(res);
         status = res.status;
       }
 
       const endTime = performance.now();
+      const responseSize = responseData
+        ? JSON.stringify(responseData).length
+        : 0;
 
       return {
         data: responseData,
         status,
         time: Math.round(endTime - startTime),
-        size: JSON.stringify(responseData).length,
+        size: responseSize,
       };
     } catch (error) {
       const endTime = performance.now();
