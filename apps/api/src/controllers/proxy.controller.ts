@@ -10,6 +10,20 @@ export const proxySchema = z.object({
 });
 
 /**
+ * Headers that should not be forwarded (hop-by-hop headers)
+ */
+const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+];
+
+/**
  * Handles proxy requests by forwarding them to the target URL
  */
 export async function handleProxyRequest(
@@ -19,7 +33,19 @@ export async function handleProxyRequest(
 ) {
   try {
     const result = await forwardRequest(req.body);
-    res.status(result.status).json(result.data);
+
+    // Forward safe headers from upstream response
+    if (result.headers) {
+      Object.entries(result.headers).forEach(([key, value]) => {
+        const lowerKey = key.toLowerCase();
+        if (!HOP_BY_HOP_HEADERS.includes(lowerKey) && value !== undefined) {
+          res.set(key, String(value));
+        }
+      });
+    }
+
+    // Using send() to preserve raw response (works for JSON, text, binary)
+    res.status(result.status).send(result.data);
   } catch (error) {
     next(error);
   }
