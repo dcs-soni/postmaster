@@ -17,21 +17,23 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
   const handleUpdate = (index: number, field: keyof KeyValue, value: any) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
-    onChange(newItems);
 
-    // Auto-add new row if editing the last one
+    // Auto-add new row if editing the last one (use newItems to avoid stale state)
     if (
       index === items.length - 1 &&
       (field === "key" || field === "value") &&
       value
     ) {
-      if (items[index].key || items[index].value) {
-        onChange([
-          ...newItems,
-          { id: crypto.randomUUID(), key: "", value: "", enabled: true },
-        ]);
+      if (newItems[index].key || newItems[index].value) {
+        newItems.push({
+          id: crypto.randomUUID(),
+          key: "",
+          value: "",
+          enabled: true,
+        });
       }
     }
+    onChange(newItems);
   };
 
   const handleRemove = (index: number) => {
@@ -57,7 +59,7 @@ export const KeyValueEditor: React.FC<KeyValueEditorProps> = ({
             <Checkbox
               checked={item.enabled}
               onCheckedChange={(checked) =>
-                handleUpdate(index, "enabled", checked)
+                handleUpdate(index, "enabled", checked === true)
               }
             />
           </div>
