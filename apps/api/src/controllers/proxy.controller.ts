@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { ProxyService } from "../services/proxy.service";
+import { forwardRequest } from "../services/proxy.service";
 import { z } from "zod";
 
 export const proxySchema = z.object({
@@ -9,13 +9,18 @@ export const proxySchema = z.object({
   data: z.any().optional(),
 });
 
-export class ProxyController {
-  static async handleRequest(req: Request, res: Response, next: NextFunction) {
-    try {
-      const result = await ProxyService.forwardRequest(req.body);
-      res.status(result.status).json(result.data); // We generally just return data, headers might be tricky due to CORS
-    } catch (error) {
-      next(error);
-    }
+/**
+ * Handles proxy requests by forwarding them to the target URL
+ */
+export async function handleProxyRequest(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    const result = await forwardRequest(req.body);
+    res.status(result.status).json(result.data);
+  } catch (error) {
+    next(error);
   }
 }

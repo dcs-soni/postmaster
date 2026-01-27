@@ -9,118 +9,128 @@ export interface ProxyRequest {
   url: string;
   method: string;
   headers?: Record<string, string>;
-  data?: any;
+  data?: unknown;
 }
 
-export class ProxyService {
-  /**
-   * Blocks: localhost, private IPs, link-local addresses, cloud metadata endpoints
-   */
-  private static isAllowedUrl(urlString: string): boolean {
-    try {
-      const url = new URL(urlString);
+export interface ProxyResponse {
+  status: number;
+  data: unknown;
+  headers?: Record<string, unknown>;
+}
 
-      if (!["http:", "https:"].includes(url.protocol)) {
-        return false;
-      }
+const LOCALHOST_PATTERNS = ["localhost", "127.0.0.1", "::1", "0.0.0.0"];
 
-      const hostname = url.hostname.toLowerCase();
+const BLOCKED_IP_PATTERNS = [
+  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // 10.0.0.0/8
+  /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/, // 172.16.0.0/12
+  /^192\.168\.\d{1,3}\.\d{1,3}$/, // 192.168.0.0/16
+  /^169\.254\.\d{1,3}\.\d{1,3}$/, // Link-local / AWS metadata
+  /^0\.0\.0\.0$/, // All interfaces
+  /^\[?fe80:/i, // IPv6 link-local
+  /^\[?fc00:/i, // IPv6 private
+  /^\[?fd00:/i, // IPv6 private
+  /^\[?::ffff:/i, // IPv4-mapped IPv6 (bracket notation)
+];
 
-      const localhostPatterns = ["localhost", "127.0.0.1", "::1", "0.0.0.0"];
-      if (localhostPatterns.includes(hostname)) {
-        return false;
-      }
+const BLOCKED_HOSTNAMES = [
+  "metadata.google.internal",
+  "metadata.goog",
+  "169.254.169.254",
+];
 
-      // Block IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
-      if (hostname.startsWith("::ffff:")) {
-        const ipv4Part = hostname.slice(7);
-        // Re-validate the extracted IPv4 address
-        if (
-          localhostPatterns.includes(ipv4Part) ||
-          /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
-          /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
-          /^192\.168\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
-          /^169\.254\.\d{1,3}\.\d{1,3}$/.test(ipv4Part)
-        ) {
-          return false;
-        }
-      }
+/**
+ * Validates URL to prevent SSRF attacks
+ * Blocks: localhost, private IPs, link-local addresses, cloud metadata endpoints
+ */
+function isAllowedUrl(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
 
-      // Block private IP ranges and cloud metadata endpoints
-      const blockedPatterns = [
-        /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, // 10.0.0.0/8
-        /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/, // 172.16.0.0/12
-        /^192\.168\.\d{1,3}\.\d{1,3}$/, // 192.168.0.0/16
-        /^169\.254\.\d{1,3}\.\d{1,3}$/, // Link-local / AWS metadata
-        /^0\.0\.0\.0$/, // All interfaces
-        /^\[?fe80:/i, // IPv6 link-local
-        /^\[?fc00:/i, // IPv6 private
-        /^\[?fd00:/i, // IPv6 private
-        /^\[?::ffff:/i, // IPv4-mapped IPv6 (bracket notation)
-      ];
-
-      if (blockedPatterns.some((pattern) => pattern.test(hostname))) {
-        return false;
-      }
-
-      const blockedHostnames = [
-        "metadata.google.internal",
-        "metadata.goog",
-        "169.254.169.254",
-      ];
-      if (blockedHostnames.includes(hostname)) {
-        return false;
-      }
-
-      return true;
-    } catch {
+    if (!["http:", "https:"].includes(url.protocol)) {
       return false;
     }
+
+    const hostname = url.hostname.toLowerCase();
+
+    if (LOCALHOST_PATTERNS.includes(hostname)) {
+      return false;
+    }
+
+    // Block IPv4-mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
+    if (hostname.startsWith("::ffff:")) {
+      const ipv4Part = hostname.slice(7);
+      if (
+        LOCALHOST_PATTERNS.includes(ipv4Part) ||
+        /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
+        /^192\.168\.\d{1,3}\.\d{1,3}$/.test(ipv4Part) ||
+        /^169\.254\.\d{1,3}\.\d{1,3}$/.test(ipv4Part)
+      ) {
+        return false;
+      }
+    }
+
+    if (BLOCKED_IP_PATTERNS.some((pattern) => pattern.test(hostname))) {
+      return false;
+    }
+
+    if (BLOCKED_HOSTNAMES.includes(hostname)) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Forwards an HTTP request to the target URL
+ */
+export async function forwardRequest(
+  payload: ProxyRequest,
+): Promise<ProxyResponse> {
+  const { url, method, headers, data } = payload;
+
+  // SSRF Protection - validate URL before making request
+  if (!isAllowedUrl(url)) {
+    logger.warn({ url }, "Blocked request to disallowed URL");
+    throw new Error(
+      "Request blocked: URL points to a restricted or internal address",
+    );
   }
 
-  static async forwardRequest(payload: ProxyRequest) {
-    const { url, method, headers, data } = payload;
+  logger.info({ method, url }, "Forwarding request");
 
-    // SSRF Protection - validate URL before making request
-    if (!this.isAllowedUrl(url)) {
-      logger.warn({ url }, "Blocked request to disallowed URL");
-      throw new Error(
-        "Request blocked: URL points to a restricted or internal address",
-      );
-    }
+  try {
+    const response = await axios({
+      url,
+      method,
+      headers: headers || {},
+      data: data || undefined,
+      validateStatus: () => true,
+      timeout: REQUEST_TIMEOUT_MS,
+      maxContentLength: MAX_CONTENT_LENGTH,
+      maxBodyLength: MAX_CONTENT_LENGTH,
+      maxRedirects: MAX_REDIRECTS,
+    });
 
-    logger.info({ method, url }, "Forwarding request");
-
-    try {
-      const response = await axios({
-        url,
-        method,
-        headers: headers || {},
-        data: data || undefined,
-        validateStatus: () => true, // want to capture all statuses
-        timeout: REQUEST_TIMEOUT_MS,
-        maxContentLength: MAX_CONTENT_LENGTH,
-        maxBodyLength: MAX_CONTENT_LENGTH,
-        maxRedirects: MAX_REDIRECTS,
-      });
-
-      return {
-        status: response.status,
-        data: response.data,
-        headers: response.headers,
-      };
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        logger.error({ error: error.message }, "Proxy request failed");
-        if (error.response) {
-          return {
-            status: error.response.status,
-            data: error.response.data,
-          };
-        }
-        throw new Error(error.message || "Network Error");
+    return {
+      status: response.status,
+      data: response.data,
+      headers: response.headers as Record<string, unknown>,
+    };
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      logger.error({ error: error.message }, "Proxy request failed");
+      if (error.response) {
+        return {
+          status: error.response.status,
+          data: error.response.data,
+        };
       }
-      throw error;
+      throw new Error(error.message || "Network Error");
     }
+    throw error;
   }
 }

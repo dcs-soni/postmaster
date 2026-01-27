@@ -3,7 +3,7 @@ import { Play, RotateCcw } from "lucide-react";
 import { useRequest } from "../../contexts/RequestContext";
 import type { HttpMethod } from "../../contexts/RequestContext";
 import { useHistory } from "../../hooks/useHistory";
-import { ApiService } from "@/services/api.service";
+import { sendRequest } from "@/services/api.service";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -76,7 +76,7 @@ export const UrlBar = () => {
       }
 
       // 4. Send Request via Service
-      const result = await ApiService.sendRequest(
+      const result = await sendRequest(
         {
           url: finalUrl,
           method: state.method,
