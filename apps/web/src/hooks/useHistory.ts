@@ -43,9 +43,14 @@ export const useHistory = () => {
 
   const addToHistory = (request: RequestState, status: number) => {
     const currentStored = localStorage.getItem(STORAGE_KEY);
-    const currentHistory: HistoryItem[] = currentStored
-      ? JSON.parse(currentStored)
-      : [];
+    let currentHistory: HistoryItem[] = [];
+    if (currentStored) {
+      try {
+        currentHistory = JSON.parse(currentStored);
+      } catch (e) {
+        console.error("Failed to parse history in addToHistory", e);
+      }
+    }
 
     const newItem: HistoryItem = {
       id: crypto.randomUUID(),

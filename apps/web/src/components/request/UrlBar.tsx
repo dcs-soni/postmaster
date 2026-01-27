@@ -3,7 +3,7 @@ import { Play, RotateCcw } from "lucide-react";
 import { useRequest } from "../../contexts/RequestContext";
 import type { HttpMethod } from "../../contexts/RequestContext";
 import { useHistory } from "../../hooks/useHistory";
-import { ApiService } from "@/services/api.service";
+import { sendRequest } from "@/services/api.service";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,57 +38,76 @@ export const UrlBar = () => {
   const handleSend = async () => {
     dispatch({ type: "START_REQUEST" });
 
-    // 1. Prepare URL with Params
-    let finalUrl = state.url;
     try {
-      const activeParams = state.queryParams.filter((p) => p.enabled && p.key);
-      if (activeParams.length > 0) {
-        const u = new URL(state.url);
-        activeParams.forEach((p) => u.searchParams.append(p.key, p.value));
-        finalUrl = u.toString();
-      }
-    } catch (e) {
-      console.warn("Invalid URL for params", e);
-    }
-
-    // 2. Prepare Headers
-    const headers: Record<string, string> = {};
-    state.headers.forEach((h) => {
-      if (h.enabled && h.key) headers[h.key] = h.value;
-    });
-
-    // 3. Prepare Body
-    let body: any = undefined;
-    if (["POST", "PUT", "PATCH"].includes(state.method) && state.bodyContent) {
+      // 1. Prepare URL with Params
+      let finalUrl = state.url;
       try {
-        body = JSON.parse(state.bodyContent);
+        const activeParams = state.queryParams.filter(
+          (p) => p.enabled && p.key,
+        );
+        if (activeParams.length > 0) {
+          const u = new URL(state.url);
+          activeParams.forEach((p) => u.searchParams.append(p.key, p.value));
+          finalUrl = u.toString();
+        }
       } catch (e) {
-        // If content type is not JSON, we might want to send as string
-        // For now, let's keep it simple or log error
-        console.warn("Body is not valid JSON", e);
+        console.warn("Invalid URL for params", e);
       }
+
+      // 2. Prepare Headers
+      const headers: Record<string, string> = {};
+      state.headers.forEach((h) => {
+        if (h.enabled && h.key) headers[h.key] = h.value;
+      });
+
+      // 3. Prepare Body
+      let body: any = undefined;
+      if (
+        ["POST", "PUT", "PATCH"].includes(state.method) &&
+        state.bodyContent
+      ) {
+        try {
+          body = JSON.parse(state.bodyContent);
+        } catch (e) {
+          // If content type is not JSON, we might want to send as string
+          // For now, let's keep it simple or log error
+          console.warn("Body is not valid JSON", e);
+        }
+      }
+
+      // 4. Send Request via Service
+      const result = await sendRequest(
+        {
+          url: finalUrl,
+          method: state.method,
+          headers,
+          body,
+        },
+        useProxy,
+      );
+
+      dispatch({
+        type: "SET_RESPONSE",
+        response: result.data,
+        status: result.status,
+        time: result.time,
+        size: result.size,
+      });
+
+      addToHistory(state, result.status);
+    } catch (error) {
+      console.error("Request failed unexpectedly", error);
+      dispatch({
+        type: "SET_RESPONSE",
+        response: {
+          error: "Request failed unexpectedly",
+          details: String(error),
+        },
+        status: 0,
+        time: 0,
+        size: 0,
+      });
     }
-
-    // 4. Send Request via Service
-    const result = await ApiService.sendRequest(
-      {
-        url: finalUrl,
-        method: state.method,
-        headers,
-        body,
-      },
-      useProxy,
-    );
-
-    dispatch({
-      type: "SET_RESPONSE",
-      response: result.data,
-      status: result.status,
-      time: result.time,
-      size: result.size,
-    });
-
-    addToHistory(state, result.status);
   };
 
   const getMethodColor = (method: string) => {
@@ -99,6 +118,8 @@ export const UrlBar = () => {
         return "text-amber-500";
       case "PUT":
         return "text-cyan-500";
+      case "PATCH":
+        return "text-violet-500";
       case "DELETE":
         return "text-red-500";
       default:

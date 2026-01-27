@@ -1,7 +1,7 @@
 import app from "./app";
 import { logger } from "./utils/logger";
 
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.listen(PORT, () => {
   logger.info(`Server is running on http://localhost:${PORT}`);

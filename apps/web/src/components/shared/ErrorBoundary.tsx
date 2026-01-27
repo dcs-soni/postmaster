@@ -37,7 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
         >
           <h1>Something went wrong.</h1>
           <pre>{this.state.error?.toString()}</pre>
-          <pre>{this.state.error?.stack}</pre>
+          {import.meta.env.DEV && <pre>{this.state.error?.stack}</pre>}
         </div>
       );
     }
