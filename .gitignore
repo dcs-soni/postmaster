@@ -40,3 +40,8 @@ coverage
 *.sw?
 .bun/
 tsconfig.tsbuildinfo
+
+# Deployment Artifacts
+certbot/
+*.pem
+*.key
