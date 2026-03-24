@@ -60,7 +60,7 @@ export function requestLoggerMiddleware(
       type: "request",
       method: req.method,
       path: req.path,
-      query: req.query,
+      ...(process.env.NODE_ENV !== "production" && { query: req.query }),
       headers: sanitizeHeaders(req.headers as Record<string, unknown>),
       ip: req.ip || req.socket.remoteAddress,
       userAgent: req.get("user-agent"),
