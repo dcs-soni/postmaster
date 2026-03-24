@@ -1,5 +1,10 @@
 import axios, { AxiosError } from "axios";
-import { logger } from "../utils/logger";
+import { createChildLogger, logger } from "../utils/logger";
+import {
+  proxyRequestDuration,
+  proxyRequestsTotal,
+  blockedRequestsTotal,
+} from "../observability/metrics";
 
 const REQUEST_TIMEOUT_MS = 30000;
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024;
@@ -10,6 +15,7 @@ export interface ProxyRequest {
   method: string;
   headers?: Record<string, string>;
   data?: unknown;
+  correlationId?: string;
 }
 
 export interface ProxyResponse {
@@ -85,22 +91,40 @@ function isAllowedUrl(urlString: string): boolean {
 }
 
 /**
+ * Extract domain from URL for metrics labeling
+ */
+function extractDomain(urlString: string): string {
+  try {
+    const url = new URL(urlString);
+    return url.hostname;
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Forwards an HTTP request to the target URL
+ * Includes metrics instrumentation for observability
  */
 export async function forwardRequest(
   payload: ProxyRequest,
 ): Promise<ProxyResponse> {
-  const { url, method, headers, data } = payload;
+  const { url, method, headers, data, correlationId } = payload;
+  const log = correlationId ? createChildLogger(correlationId) : logger;
+  const targetDomain = extractDomain(url);
 
   // SSRF Protection - validate URL before making request
   if (!isAllowedUrl(url)) {
-    logger.warn({ url }, "Blocked request to disallowed URL");
+    log.warn({ url, targetDomain }, "Blocked request to disallowed URL");
+    blockedRequestsTotal.inc({ reason: "ssrf_protection" });
     throw new Error(
       "Request blocked: URL points to a restricted or internal address",
     );
   }
 
-  logger.info({ method, url }, "Forwarding request");
+  log.info({ method, url, targetDomain }, "Forwarding proxy request");
+
+  const startTime = process.hrtime.bigint();
 
   try {
     const response = await axios({
@@ -115,14 +139,62 @@ export async function forwardRequest(
       maxRedirects: MAX_REDIRECTS,
     });
 
+    const endTime = process.hrtime.bigint();
+    const durationInSeconds = Number(endTime - startTime) / 1e9;
+    const statusCode = response.status.toString();
+
+    // Record metrics
+    proxyRequestDuration.observe(
+      { target_domain: targetDomain, method, status_code: statusCode },
+      durationInSeconds,
+    );
+    proxyRequestsTotal.inc({
+      target_domain: targetDomain,
+      method,
+      status_code: statusCode,
+    });
+
+    log.info(
+      {
+        method,
+        url,
+        targetDomain,
+        statusCode: response.status,
+        durationMs: Math.round(durationInSeconds * 1000),
+      },
+      "Proxy request completed",
+    );
+
     return {
       status: response.status,
       data: response.data,
       headers: response.headers as Record<string, unknown>,
     };
   } catch (error) {
+    const endTime = process.hrtime.bigint();
+    const durationInSeconds = Number(endTime - startTime) / 1e9;
+
+    // Record failed request metrics
+    proxyRequestDuration.observe(
+      { target_domain: targetDomain, method, status_code: "error" },
+      durationInSeconds,
+    );
+    proxyRequestsTotal.inc({
+      target_domain: targetDomain,
+      method,
+      status_code: "error",
+    });
+
     if (error instanceof AxiosError) {
-      logger.error({ error: error.message }, "Proxy request failed");
+      log.error(
+        {
+          error: error.message,
+          code: error.code,
+          targetDomain,
+          durationMs: Math.round(durationInSeconds * 1000),
+        },
+        "Proxy request failed",
+      );
       if (error.response) {
         return {
           status: error.response.status,

@@ -25,6 +25,7 @@ const HOP_BY_HOP_HEADERS = [
 
 /**
  * Handles proxy requests by forwarding them to the target URL
+ * Includes correlation ID for distributed tracing
  */
 export async function handleProxyRequest(
   req: Request,
@@ -32,7 +33,11 @@ export async function handleProxyRequest(
   next: NextFunction,
 ) {
   try {
-    const result = await forwardRequest(req.body);
+    // Pass correlation ID to proxy service for tracing
+    const result = await forwardRequest({
+      ...req.body,
+      correlationId: req.correlationId,
+    });
 
     // Forward safe headers from upstream response
     if (result.headers) {
