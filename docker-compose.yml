@@ -1,6 +1,10 @@
 version: "3.8"
 
 services:
+  # ==========================================================================
+  # Application Services
+  # ==========================================================================
+
   app:
     build:
       context: .
@@ -15,8 +19,11 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - LOG_LEVEL=info
     networks:
       - postmaster-network
+    labels:
+      - "logging=promtail"
 
   nginx:
     image: nginx:alpine
@@ -41,6 +48,87 @@ services:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  # ==========================================================================
+  # Observability Stack
+  # ==========================================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: postmaster-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    networks:
+      - postmaster-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: postmaster-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - postmaster-network
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: postmaster-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - postmaster-network
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: postmaster-promtail
+    restart: unless-stopped
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - postmaster-network
+
+# ==========================================================================
+# Volumes for Data Persistence
+# ==========================================================================
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+
+# ==========================================================================
+# Networks
+# ==========================================================================
 
 networks:
   postmaster-network:

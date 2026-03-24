@@ -1,0 +1,50 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Only scrape containers with specific labels
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(postmaster|postmaster-nginx)"
+        action: keep
+      # Extract container name as label
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(.*)"
+        target_label: "container"
+      # Add job label
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/postmaster$"
+        target_label: "job"
+        replacement: "postmaster-api"
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/postmaster-nginx$"
+        target_label: "job"
+        replacement: "nginx"
+    pipeline_stages:
+      # Parse JSON logs from Postmaster API
+      - json:
+          expressions:
+            level: level
+            correlationId: correlationId
+            msg: msg
+            method: method
+            path: path
+            statusCode: statusCode
+            durationMs: durationMs
+      # Set log level
+      - labels:
+          level:
+          correlationId:
+          method:
+          path:
