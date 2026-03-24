@@ -44,10 +44,13 @@ app.get("/health", (req, res) => {
   const uptime = process.uptime();
   const memoryUsage = process.memoryUsage();
 
+  // Prefer runtime env APP_VERSION, fallback to npm_package_version
+  const appVersion = process.env.APP_VERSION || process.env.npm_package_version;
+
   res.json({
     status: "ok",
     service: "postmaster-proxy",
-    version: process.env.npm_package_version || "1.0.0",
+    version: appVersion,
     uptime: {
       seconds: Math.floor(uptime),
       formatted: formatUptime(uptime),
